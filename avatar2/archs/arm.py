@@ -118,6 +118,5 @@ class ARM64(Architecture):
     capstone_arch = CS_ARCH_ARM64
     capstone_mode = CS_MODE_LITTLE_ENDIAN
     keystone_arch = KS_ARCH_ARM64
-    #keystone_mode = KS_MODE_ARM
     unicorn_arch = UC_ARCH_ARM64
     unicorn_mode = UC_MODE_ARM
