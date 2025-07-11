@@ -1,5 +1,3 @@
-# from capstone import CS_ARCH_ARM, CS_MODE_LITTLE_ENDIAN, CS_MODE_BIG_ENDIAN
-
 from capstone import *
 from keystone.keystone_const import *
 from unicorn import *
@@ -10,19 +8,19 @@ import avatar2
 
 from avatar2.installer.config import QEMU, PANDA, OPENOCD, GDB_MULTI
 
+
 class ARM(Architecture):
 
     get_qemu_executable = Architecture.resolve(QEMU)
     get_panda_executable = Architecture.resolve(PANDA)
-    get_gdb_executable  = Architecture.resolve(GDB_MULTI)
+    get_gdb_executable = Architecture.resolve(GDB_MULTI)
     get_oocd_executable = Architecture.resolve(OPENOCD)
-
-
 
     qemu_name = 'arm'
     gdb_name = 'arm'
+    # Based on gdb profile
     registers = {'r0': 0, 'r1': 1, 'r2': 2, 'r3': 3, 'r4': 4, 'r5': 5, 'r6': 6,
-                 'r7': 7, 'r8': 8, 'r9': 9, 'r10': 10, 'r11': 11, 'r12': 12,
+                 'r7': 7, 'r8': 8, 'r9': 9, 'r10': 10, 'r11': 11, 'r12': 12, 'ip': 12,
                  'sp': 13, 'lr': 14, 'pc': 15, 'cpsr': 25,
                  }
     unicorn_registers = {'r0': UC_ARM_REG_R0, 'r1': UC_ARM_REG_R1, 'r2': UC_ARM_REG_R2,
@@ -41,24 +39,24 @@ class ARM(Architecture):
     unicorn_arch = UC_ARCH_ARM
     unicorn_mode = UC_MODE_ARM
 
+
 class ARM_CORTEX_M3(ARM):
     cpu_model = 'cortex-m3'
     qemu_name = 'arm'
     gdb_name = 'arm'
 
-    capstone_arch = CS_ARCH_ARM
-    keystone_arch = KS_ARCH_ARM
     capstone_mode = CS_MODE_LITTLE_ENDIAN | CS_MODE_THUMB | CS_MODE_MCLASS
     keystone_arch = KS_ARCH_ARM
     keystone_mode = KS_MODE_LITTLE_ENDIAN | KS_MODE_THUMB
     unicorn_arch = UC_ARCH_ARM
     unicorn_mode = UC_MODE_LITTLE_ENDIAN | UC_MODE_THUMB
     sr_name = 'xpsr'
-
+    # The xpsr register has different register numbers across QEmu and OpenOCD, so we make sure to read/write it only by name
+    special_registers = {'xpsr': {'gdb_expression': "$xpsr", 'format': "{:d}"}}
 
     @staticmethod
     def register_write_cb(avatar, *args, **kwargs):
-                
+
         if isinstance(kwargs['watched_target'],
                       avatar2.targets.qemu_target.QemuTarget):
             qemu = kwargs['watched_target']
@@ -72,12 +70,12 @@ class ARM_CORTEX_M3(ARM):
                 shiftval = 24
 
             if args[0] == 'pc' or args[0] == 'cpsr':
-                cpsr = qemu.read_register('cpsr')
-                if cpsr & 1<< shiftval:
+                cpsr = qemu.protocols.registers.read_register('cpsr')
+                if cpsr & 1 << shiftval:
                     return
                 else:
-                    cpsr |= 1<<shiftval
-                    qemu.write_register('cpsr', cpsr)
+                    cpsr |= 1 << shiftval
+                    qemu.protocols.registers.write_register('cpsr', cpsr)
 
     @staticmethod
     def init(avatar):
@@ -85,7 +83,10 @@ class ARM_CORTEX_M3(ARM):
                             ARM_CORTEX_M3.register_write_cb)
 
         pass
-ARMV7M = ARM_CORTEX_M3
+
+
+
+ARMV7M = [ARM_CORTEX_M3]
 
 
 class ARMBE(ARM):
