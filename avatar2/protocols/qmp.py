@@ -1,53 +1,47 @@
-import sys
-
-if sys.version_info < (3, 0):
-    import Queue as queue
-else:
-    import queue
-
 import logging
 import json
 import telnetlib
 import re
+import threading
 
 from avatar2 import archs
 
 
-
 import socket
- 
+
+
 class UnixSocket:
 
 
-    def __init__(self,file):
+    def __init__(self, file):
 
         self.buff = ""
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._socket.connect(file)
 
-    def read(self, length = 1024):
+    def read(self, length=1024):
 
         """ Read 1024 bytes off the socket """
 
         return self._socket.recv(length)
- 
+
     def read_until(self, data):
 
         """ Read data into the buffer until we have data """
 
         while not data in self.buff:
             self.buff += self._socket.recv(1024).decode('ascii')
- 
+
         pos = self.buff.find(data)
         rval = self.buff[:pos + len(data)]
         self.buff = self.buff[pos + len(data):]
- 
+
         return rval
- 
+
     def write(self, data):
 
         self._socket.send(data)
-    
+
     def close(self):
 
         self._socket.close()
@@ -61,9 +55,10 @@ class QMPProtocol(object):
                                      (origin.log.name, self.__class__.__name__)
                                      ) if origin else \
             logging.getLogger(self.__class__.__name__)
-        self.origin=origin
+        self.origin = origin
         self.id = 0
         self.unix_socket = unix_socket
+        self.lock = threading.Lock()
 
     def __del__(self):
         self.shutdown()
@@ -71,43 +66,55 @@ class QMPProtocol(object):
     def connect(self):
         if self.unix_socket is not None:
             self._socket = UnixSocket(self.unix_socket)
-            resp = self._socket.read_until("\r\n");
+            self._socket.read_until("\r\n")
         else:
             self._socket = telnetlib.Telnet('127.0.0.1', self.port)
-            resp = self._socket.read_until('\r\n'.encode('ascii'))
+            self._socket.read_until('\r\n'.encode('ascii'))
         self.execute_command('qmp_capabilities')
         return True
 
     def execute_command(self, cmd, args=None):
-        command = {}
-        command['execute'] = cmd
-        if args:
-            command['arguments'] = args
-        command['id'] = self.id
-        self._socket.write(('%s\r\n' % json.dumps(command)).encode('ascii'))
+        with self.lock:
+            # Build the QMP command
+            command = {
+                'execute': cmd,
+                'id': self.id
+            }
+            if args:
+                command['arguments'] = args
 
-        while True:
-            if self.unix_socket is not None:
-                resp = self._socket.read_until('\r\n')
-                self.log.info("Received: %s" % resp)
-                resp = json.loads(resp)
-            else: 
-                resp = self._socket.read_until('\r\n'.encode('ascii'))
-                self.log.info("Received: %s" % resp)
-                resp = json.loads(resp.decode('ascii'))
+            # Send it
+            command_str = json.dumps(command) + "\r\n"
+            self.log.info("Sending command: %s" % command_str.strip())
+            self._socket.write(command_str.encode('ascii'))
 
-            if 'event' in resp:
-                continue
-            if 'id' in resp:
-                break
-        if resp['id'] != self.id:
-            raise Exception('Mismatching id for qmp response')
-        self.id += 1
-        if 'error' in resp:
-            return resp['error']
-        if 'return' in resp:
-            return resp['return']
-        raise Exception("Response contained neither an error nor an return")
+            # Read replies until we get our ID (skip events)
+            while True:
+                if self.unix_socket is not None:
+                    raw = self._socket.read_until('\r\n')
+                    self.log.info("Received: %s" % raw)
+                    resp = json.loads(raw)
+                else:
+                    raw = self._socket.read_until('\r\n'.encode('ascii'))
+                    self.log.info("Received: %s" % raw)
+                    resp = json.loads(raw.decode('ascii'))
+
+                if 'event' in resp:
+                    continue
+                if 'id' in resp:
+                    break
+
+            # Check and return
+            if resp['id'] != self.id:
+                raise Exception('Mismatching id for qmp response')
+            self.id += 1
+
+            if 'error' in resp:
+                return resp['error']
+            if 'return' in resp:
+                return resp['return']
+
+            raise Exception("Response contained neither an error nor a return")
 
     def reset(self):
         """
@@ -142,7 +149,7 @@ class QMPProtocol(object):
             regs_r = re.findall('(...)=([0-9a-f]{8})', regs_s)
             return dict([(r.lower(), int(v, 16)) for r, v in regs_r])
         else:
-            raise Exception( ("get_registers in non-raw mode called on "
+            raise Exception(("get_registers in non-raw mode called on "
                               "unsupported arch %s") %
                               self.origin.avatar.arch.__name__)
 
@@ -157,6 +164,6 @@ class QMPProtocol(object):
         regs = self.get_registers(raw=True)
         regs_r = re.findall(reg.upper()+'\s?=[0-9a-f]+\s([0-9a-f]+)', regs)
         if len(regs_r) != 1:
-            raise exception("Couldn't retrieve base for %s" % reg)
+            raise Exception("Couldn't retrieve base for %s" % reg)
 
         return int(regs_r[0], 16)

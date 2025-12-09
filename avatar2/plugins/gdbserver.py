@@ -7,15 +7,16 @@ import binascii
 import struct
 
 import xml.etree.ElementTree as ET
-
 from time import sleep
+from collections import defaultdict, OrderedDict
 from struct import pack
 from types import MethodType
 from threading import Thread, Event
 from socket import AF_INET, SOCK_STREAM, SOL_SOCKET, SO_REUSEADDR
 from os.path import dirname
-
+from avatar2.protocols.gdb import GDBProtocol
 from avatar2.targets import TargetStates
+
 
 l = logging.getLogger('avatar2.gdbplugin')
 
@@ -40,6 +41,8 @@ class GDBRSPServer(Thread):
         self.xml_file = xml_file
         self.do_forwarding = do_forwarding
 
+        self.xml_files = defaultdict(list)
+
         self._packetsize=0x47FF
         self.running = False
         self.bps = {}
@@ -50,13 +53,17 @@ class GDBRSPServer(Thread):
         self.registers = [reg.attrib for reg in xml_regs if reg.tag == 'reg']
         assert(len(self.registers))
 
+        l.debug("Registers %s"% self.registers)
+
+        self.registers = []  # Will populate when connection made and xml is
+                               # read from target
         self.handlers = {
-            'q' : self.query,
-            'v' : self.multi_letter_cmd,
+            'q' : self.forward_pkt,
+            'v' : self.forward_pkt,
             'H' : self.set_thread_op,
-            '?' : self.halt_reason,
-            'g' : self.read_registers,
-            'G' : self.reg_write,
+            '?' : self.forward_pkt,
+            'g' : self.forward_pkt,
+            'G' : self.forward_pkt,
             'm' : self.mem_read,
             'M' : self.mem_write,
             'c' : self.cont,
@@ -96,10 +103,12 @@ class GDBRSPServer(Thread):
                     continue
 
                 l.debug(f'Received: {packet}')
-                self.send_raw(b'+') # send ACK
 
+                self.send_raw(b'+') # send ACK
+                # resp = self.forward_pkt(packet)
+                # l.debug("Sending Response %s" % resp)
                 handler = self.handlers.get(chr(packet[0]),
-                                                self.not_implemented)
+                                                  self.not_implemented)
                 resp = handler(packet)
                 if resp is not None:
                     self.send_packet(resp)
@@ -111,6 +120,20 @@ class GDBRSPServer(Thread):
         l.critical(f'Received not implemented packet: {pkt}')
         return b''
 
+
+    def forward_pkt(self, pkt):
+        ## TODO make  so reverts to old code if no GDBProtocol
+        if hasattr(self.target.protocols,'execution') and \
+            issubclass(type(self.target.protocols.execution), GDBProtocol):
+            gdb = self.target.protocols.execution
+            success, resp = gdb.console_command(f"maintenance packet {pkt.decode()}")
+            if success:
+                data = resp.split('received: \\"')[1][:-4]
+                # Data has been escaped twice by time we get it.
+                data = data.encode('utf-8').decode('unicode_escape')
+                data = data.encode('utf-8').decode('unicode_escape')
+                return data.encode()
+
     def query(self, pkt):
         if pkt[1:].startswith(b'Supported') is True:
             feat = [b'PacketSize=%x' % self._packetsize,
@@ -121,7 +144,51 @@ class GDBRSPServer(Thread):
         if pkt[1:].startswith(b'Attached') is True:
             return b'1'
 
-        if pkt[1:].startswith(b'Xfer:features:read:target.xml') is True:
+        if pkt[1:].startswith(b'Xfer:features:read:') is True:
+            request = pkt[1:].split(b':')
+            l.debug("Request has %s"%request)
+            filename = request[3]
+            start_idx, rd_size = request[4].split(b",")
+            start_idx = int(start_idx, 16)
+            rd_size= int(rd_size, 16)
+            #If target has a connection to GDB use it and forward the
+            #request. Maybe able to replace most the code here with this approach
+            if hasattr(self.target.protocols,'execution') and \
+                issubclass(type(self.target.protocols.execution), GDBProtocol):
+                l.debug("Forwarding request for %s", pkt[1:])
+                gdb = self.target.protocols.execution
+                success, resp = gdb.console_command(f"maintenance packet {pkt.decode()}")
+                if success:
+                    data = resp.split('received: \\"')[1][:-4]
+                    # Data has been escaped twice by time we get it.
+                    data = data.encode('utf-8').decode('unicode_escape')
+                    data = data.encode('utf-8').decode('unicode_escape')
+                    
+                    ret_data = data.encode()
+                    l.debug("Ret_data %s"% ret_data)
+                    
+                    payload = ret_data[1:]
+                    self.xml_files[filename].append(payload)
+                    if len(payload) < rd_size:
+                        # This is last read of xml will want to parse it
+                        xml_data = b''.join(self.xml_files[filename])
+
+                        l.debug("Writing to %s: %s"%(filename, xml_data))
+                        with open(filename, 'wb') as outfile:
+                            outfile.write(xml_data)
+                        try:
+                            xml_regs = ET.fromstring(xml_data).find('feature')
+                            if xml_regs:
+                                regs = [reg.attrib for reg in xml_regs if reg.tag == 'reg']
+                                l.debug("Adding registers %s" % regs)
+                                self.registers.extend(regs)
+                        except ET.ParseError as e :
+                            l.debug("Parsing Error: %s"% e)
+                            pass
+                    return ret_data
+                return None
+                
+
             off, length = match_hex('qXfer:features:read:target.xml:(.*),(.*)',
                                    pkt.decode())
             
@@ -186,9 +253,9 @@ class GDBRSPServer(Thread):
             assert( bitsize % 8 == 0)
             r_len = int(bitsize / 8)
             r_val = self.target.read_register(reg['name'])
+            if r_val is not None:
             #l.debug(f'{reg["name"]}, {r_val}, {r_len}')
-
-            resp += r_val.to_bytes(r_len, 'little').hex()
+                resp += r_val.to_bytes(r_len, 'little').hex()
             
         return resp.encode()
     
@@ -370,4 +437,5 @@ def load_plugin(avatar):
     avatar.spawn_gdb_server = MethodType(spawn_gdb_server, avatar)
     avatar.watchmen.add_watchman('TargetShutdown', when='before',
                                  callback=exit_server)
+
     avatar._gdb_servers = []

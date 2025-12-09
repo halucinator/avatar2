@@ -1,5 +1,6 @@
 from threading import Thread
 from time import sleep
+from os.path import abspath
 from avatar2.targets import PandaTarget
 
 from ..watchmen import watch
@@ -17,7 +18,8 @@ class PyPandaTarget(PandaTarget):
         except ImportError:
             raise RuntimeError(("PyPanda could not be found! for installation, "
                     "please follow the steps at https://github.com/"
-                    "panda-re/panda/blob/master/panda/pypanda/docs/USAGE.md"))
+                    "panda-re/panda/blob/dev/panda/python/docs/USAGE.md"))
+        kwargs['executable'] = abspath(pandare.__file__)
 
         super(PyPandaTarget, self).__init__(*args, **kwargs)
 
@@ -26,9 +28,7 @@ class PyPandaTarget(PandaTarget):
         self._thread = None
 
     def shutdown(self):
-
-
-        if self._thread.is_alive():
+        if self._thread is not None and self._thread.is_alive():
             self.protocols.execution.remote_disconnect()
             self.pypanda.end_analysis()
 
@@ -36,6 +36,7 @@ class PyPandaTarget(PandaTarget):
             while self._thread.is_alive():
                 sleep(.01)
 
+        super(PyPandaTarget, self).shutdown()
 
     @watch('TargetInit')
     def init(self, **kwargs):
@@ -63,7 +64,7 @@ class PyPandaTarget(PandaTarget):
 
 
 
-        self.pypanda.setup_internal_signal_handler(signal_handler=SigHandler)
+        self.pypanda._setup_internal_signal_handler(signal_handler=SigHandler)
 
         self._thread = Thread(target=self.pypanda.run, daemon=True)
         self._thread.start()

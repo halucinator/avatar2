@@ -4,7 +4,11 @@ from os.path import isfile, exists
 
 from avatar2.protocols.gdb import GDBProtocol
 from avatar2.protocols.qmp import QMPProtocol
-from avatar2.protocols.remote_memory import RemoteMemoryProtocol
+
+try:
+    from avatar2.protocols.remote_memory import RemoteMemoryProtocol
+except ImportError:
+    RemoteMemoryProtocol = None
 from avatar2.targets import Target
 
 from avatar2.installer.config import QEMU, GDB_MULTI
@@ -15,23 +19,25 @@ class QemuTarget(Target):
     """"""
 
     def __init__(
-        self,
-        avatar,
-        executable=None,
-        cpu_model=None,
-        firmware=None,
-        gdb_executable=None,
-        gdb_port=3333,
-        additional_args=None,
-        gdb_additional_args=None,
-        gdb_verbose=False,
-        qmp_port=3334,
-        entry_address=0x00,
-        log_items=None,
-        log_file=None,
-        system_clock_scale=None,
-        qmp_unix_socket=None,
-        **kwargs
+            self,
+            avatar,
+            executable=None,
+            cpu_model=None,
+            firmware=None,
+            gdb_executable=None,
+            gdb_port=3333,
+            gdb_unix_socket_path=None,
+            additional_args=None,
+            gdb_additional_args=None,
+            gdb_verbose=False,
+            qmp_port=3334,
+            entry_address=0x00,
+            log_items=None,
+            log_file=None,
+            system_clock_scale=None,
+            qmp_unix_socket=None,
+            machine=None,
+            **kwargs
     ):
         super(QemuTarget, self).__init__(avatar, **kwargs)
 
@@ -43,6 +49,8 @@ class QemuTarget(Target):
                 if executable is not None
                 else self._arch.get_qemu_executable()
             )
+
+        self.machine = machine
         self.fw = firmware
         self.cpu_model = cpu_model
         self.entry_address = entry_address
@@ -56,6 +64,7 @@ class QemuTarget(Target):
         )
 
         self.gdb_port = gdb_port
+        self.gdb_unix_socket_path = gdb_unix_socket_path
         self.gdb_additional_args = gdb_additional_args if gdb_additional_args else []
         self.gdb_verbose = gdb_verbose
 
@@ -87,9 +96,19 @@ class QemuTarget(Target):
                 "Executable for %s not found: %s" % (self.name, self.executable)
             )
 
-        machine = ["-machine", "configurable"]
-        avatar_config = ["-avatar-config", self.qemu_config_file]
+        if self.machine is None or self.machine == 'configurable':
+            machine = ["-machine", "configurable"]
+            avatar_config = ["-avatar-config", self.qemu_config_file]
+        else:
+            machine = ["-machine", self.machine]
+            avatar_config = []  # Going to use QEMU's config to create machine
         gdb_option = ["-gdb", "tcp::" + str(self.gdb_port)]
+
+        if self.gdb_unix_socket_path:
+            gdb_option = ["-gdb", "unix:%s,server,nowait" % str(self.gdb_unix_socket_path)]
+        else:
+            gdb_option = ["-gdb", "tcp::" + str(self.gdb_port)]
+
         stop_on_startup = ["-S"]
         nographic = ["-nographic"]  # , "-monitor", "/dev/null"]
         if self.qmp_unix_socket is not None:
@@ -169,6 +188,10 @@ class QemuTarget(Target):
         Generates the configuration passed to avatar-qemus configurable machine
         """
         conf_dict = self.avatar.generate_config()
+
+        if self.cpu_model is not None:
+            conf_dict["cpu_model"] = self.cpu_model
+
         conf_dict["entry_address"] = self.entry_address
         if self.fw is not None:
             conf_dict["kernel"] = self.fw
@@ -257,7 +280,7 @@ class QemuTarget(Target):
         )
 
         with open(
-            "%s/%s_out.txt" % (self.avatar.output_directory, self.name), "wb"
+                "%s/%s_out.txt" % (self.avatar.output_directory, self.name), "wb"
         ) as out, open(
             "%s/%s_err.txt" % (self.avatar.output_directory, self.name), "wb"
         ) as err:
@@ -285,7 +308,7 @@ class QemuTarget(Target):
             i[2].qemu_name
             for i in self._memory_mapping.iter()
             if hasattr(i[2], "qemu_name")
-        ]:
+        ] and RemoteMemoryProtocol is not None:
             rmp = RemoteMemoryProtocol(
                 self._rmem_tx_queue_name,
                 self._rmem_rx_queue_name,
@@ -299,10 +322,20 @@ class QemuTarget(Target):
         self.protocols.monitor = qmp
         self.protocols.remote_memory = rmp
 
-        if gdb.remote_connect(port=self.gdb_port) and qmp.connect():
+        connect_success = True
+
+        if self.gdb_unix_socket_path:
+            connect_success = connect_success and gdb.remote_connect_unix(self.gdb_unix_socket_path)
+        else:
+            connect_success = connect_success and gdb.remote_connect(port=self.gdb_port)
+
+        connect_success = connect_success and qmp.connect()
+
+        if connect_success:
             self.log.info("Connected to remote target")
         else:
             self.log.warning("Connection to remote target failed")
+
         if rmp:
             rmp.connect()
         self.wait()
