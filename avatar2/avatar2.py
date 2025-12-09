@@ -36,7 +36,7 @@ class Avatar(Thread):
     """
 
     def __init__(
-        self, arch=ARM, cpu_model=None, output_directory=None, log_to_stdout=True
+            self, arch=ARM, cpu_model=None, output_directory=None, log_to_stdout=True, configure_logging=True
     ):
         super(Avatar, self).__init__()
 
@@ -70,20 +70,23 @@ class Avatar(Thread):
             makedirs(self.output_directory)
 
         self.log = logging.getLogger("avatar")
-        format = "%(asctime)s | %(name)s.%(levelname)s | %(message)s"
 
-        logfile = "%s/avatar.log" % self.output_directory
-        logging.basicConfig(
-            filename=logfile,
-            level=logging.INFO,
-            format=format,
-        )
+        if configure_logging:
+            format = "%(asctime)s | %(name)s.%(levelname)s | %(message)s"
 
-        if log_to_stdout is True:
-            handler = logging.StreamHandler(sys.stdout)
-            handler.setFormatter(logging.Formatter(format))
-            root = logging.getLogger()
-            root.addHandler(handler)
+            logfile = "%s/avatar.log" % self.output_directory
+            logging.basicConfig(
+                filename=logfile,
+                level=logging.INFO,
+                format=format,
+            )
+
+            if log_to_stdout is True:
+                handler = logging.StreamHandler(sys.stdout)
+                handler.setFormatter(logging.Formatter(format))
+                root = logging.getLogger()
+                root.addHandler(handler)
+
         self.log.info(
             "Initialized Avatar. Output directory is %s" % self.output_directory
         )
@@ -128,8 +131,8 @@ class Avatar(Thread):
                 if not tname in self.targets:
                     raise Exception(
                         (
-                            "Requested target %s not found in config. "
-                            "Aborting." % tname
+                                "Requested target %s not found in config. "
+                                "Aborting." % tname
                         )
                     )
                 mr["forwarded_to"] = self.targets[tname]
@@ -182,7 +185,7 @@ class Avatar(Thread):
         self.log.info("Avatar Received SIGINT")
         self.sigint_handler()
 
-    def load_plugin(self, name, local=False):
+    def load_plugin(self, name, local=False, *args, **kwargs):
         if local is True:
             plugin = __import__(name, fromlist=["."])
         else:
@@ -190,7 +193,7 @@ class Avatar(Thread):
                 "avatar2.plugins.%s" % name, fromlist=["avatar2.plugins"]
             )
 
-        plugin.load_plugin(self)
+        plugin.load_plugin(self, *args, **kwargs)
         self.loaded_plugins += [name]
 
     @watch("AddTarget")
@@ -232,21 +235,21 @@ class Avatar(Thread):
             t[1].init()
 
     def add_memory_range(
-        self,
-        address,
-        size,
-        name=None,
-        permissions="rwx",
-        file=None,
-        file_offset=None,
-        file_bytes=None,
-        forwarded=False,
-        forwarded_to=None,
-        emulate=None,
-        interval_tree=None,
-        inline=False,
-        overwrite=False,
-        **kwargs
+            self,
+            address,
+            size,
+            name=None,
+            permissions="rwx",
+            file=None,
+            file_offset=None,
+            file_bytes=None,
+            forwarded=False,
+            forwarded_to=None,
+            emulate=None,
+            interval_tree=None,
+            inline=False,
+            overwrite=False,
+            **kwargs
     ):
         """
         Adds a memory range to avatar
@@ -293,7 +296,7 @@ class Avatar(Thread):
             **kwargs
         )
 
-        mr_set = memory_ranges[address : address + size]
+        mr_set = memory_ranges[address: address + size]
         if overwrite is True and len(mr_set) > 0:
             start = min(mr_set, key=lambda x: x.begin).begin
             end = max(mr_set, key=lambda x: x.end).end
@@ -311,7 +314,7 @@ class Avatar(Thread):
                     interval.data.size,
                 )
 
-        memory_ranges[address : address + size] = m
+        memory_ranges[address: address + size] = m
 
         return m
 
@@ -353,8 +356,8 @@ class Avatar(Thread):
         """
 
         if (
-            from_target.state & TargetStates.STOPPED == 0
-            or to_target.state & TargetStates.STOPPED == 0
+                from_target.state & TargetStates.STOPPED == 0
+                or to_target.state & TargetStates.STOPPED == 0
         ):
             raise Exception(
                 "Targets must be stopped for State Transfer, \
@@ -382,6 +385,7 @@ class Avatar(Thread):
             # Sync the registers!
             for r in regs:
                 val = from_target.read_register(r)
+                self.log.debug("Synchronizing register %6s (%s) " % (r, val))
                 to_target.write_register(r, val)
             self.log.info("Synchronized Registers")
 
@@ -401,6 +405,7 @@ class Avatar(Thread):
     def _handle_breakpoint_hit_message(self, message):
         self.log.info("Breakpoint hit for Target: %s" % message.origin.name)
         self._handle_update_state_message(message)
+
         # Breakpoints are two stages: SYNCING | STOPPED -> HandleBreakpoint -> STOPPED
         # This makes sure that all handlers are complete before stopping and breaking wait()
 
@@ -450,8 +455,8 @@ class Avatar(Thread):
         try:
             kwargs = {"num_words": message.num_words, "raw": message.raw}
             if (
-                hasattr(range.forwarded_to, "read_supports_pc")
-                and range.forwarded_to.read_supports_pc is True
+                    hasattr(range.forwarded_to, "read_supports_pc")
+                    and range.forwarded_to.read_supports_pc is True
             ):
                 kwargs["pc"] = message.pc
 
@@ -461,13 +466,13 @@ class Avatar(Thread):
             if not message.raw and message.num_words == 1 and not isinstance(mem, int):
                 raise Exception(
                     (
-                        "Forwarded read returned data of type %s "
-                        "(expected: int)" % type(mem)
+                            "Forwarded read returned data of type %s "
+                            "(expected: int)" % type(mem)
                     )
                 )
             success = True
         except Exception as e:
-            self.log.exception("RemoteMemoryRead failed: %s" % e)
+            self.log.exception("RemoteMemoryRead from %s failed: %s" % (range.forwarded_to, e))
             mem = -1
             success = False
 
@@ -488,8 +493,8 @@ class Avatar(Thread):
 
         kwargs = {}
         if (
-            hasattr(mem_range.forwarded_to, "write_supports_pc")
-            and mem_range.forwarded_to.write_supports_pc is True
+                hasattr(mem_range.forwarded_to, "write_supports_pc")
+                and mem_range.forwarded_to.write_supports_pc is True
         ):
             kwargs["pc"] = message.pc
 
@@ -519,7 +524,6 @@ class Avatar(Thread):
                 "Avatar received %s. Queue-Status: %d/%d"
                 % (message, self.queue.qsize(), self.fast_queue.qsize())
             )
-
             handler = self.message_handlers.get(message.__class__, None)
             if handler is None:
                 raise Exception("No handler for Avatar-message %s registered" % message)
