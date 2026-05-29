@@ -115,7 +115,7 @@ class ARM64(Architecture):
     pc_name = 'pc'
     sr_name = 'nzcv'
     unemulated_instructions = ['mcr', 'mrc']
-    capstone_arch = CS_ARCH_ARM64
+    capstone_arch = CS_ARCH_AARCH64
     capstone_mode = CS_MODE_LITTLE_ENDIAN
     keystone_arch = KS_ARCH_ARM64
     unicorn_arch = UC_ARCH_ARM64
