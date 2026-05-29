@@ -21,7 +21,7 @@ setup(
         'cached_property;python_version<="3.8"',
         'intervaltree',
         'posix_ipc>=1.0.0',
-        'capstone>=3.0.4',
+        'capstone>=5',
         'keystone-engine',
         'parse',
         'configparser',
@@ -30,6 +30,7 @@ setup(
         'bitstring',
         'pylink-square',
         'pyusb',
+        'setuptools<81'
     ],
     include_package_data=True,
     url='https://github.com/avatartwo/avatar2',
