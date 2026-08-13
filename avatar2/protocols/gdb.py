@@ -1,5 +1,4 @@
 import sys
-from pkg_resources import packaging
 from threading import Thread, Event, Condition
 from struct import pack, unpack
 from codecs import encode
@@ -19,6 +18,14 @@ else:
 from avatar2.archs.arm import ARM
 from avatar2.targets import TargetStates
 from avatar2.message import AvatarMessage, UpdateStateMessage, BreakpointHitMessage, SyscallCatchedMessage, WatchpointHitMessage
+
+def _simple_version_tuple(v):
+    """A tiny numeric-only version parser, just enough to order pygdbmi
+    releases below. Avoids depending on pkg_resources (removed from
+    default venvs) or the standalone `packaging` package (not a
+    guaranteed dependency)."""
+    return tuple(int(p) for p in re.findall(r'\d+', v))
+
 
 GDB_PROT_DONE = 'done'
 GDB_PROT_CONN = 'connected'
@@ -280,7 +287,7 @@ class GDBProtocol(object):
                 gdb_args += [local_arguments]
 
         # See breaking change in pygdbmi: https://github.com/cs01/pygdbmi/releases
-        if packaging.version.parse(pygdbmi.__version__) < packaging.version.parse("0.10.0.0"):
+        if _simple_version_tuple(pygdbmi.__version__) < _simple_version_tuple("0.10.0.0"):
             self._gdbmi = pygdbmi.gdbcontroller.GdbController(
                 gdb_path=gdb_executable,
                 gdb_args=gdb_args,

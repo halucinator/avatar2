@@ -1,5 +1,5 @@
 from avatar2.installer.config import AvatarConfig
-import distutils
+import shutil
 from os import environ
 from re import sub
 
@@ -18,7 +18,7 @@ class Architecture(object):
                                                      '', exec_name).upper()
         env_exec = environ.get( env_var_name )
         if env_exec is not None:
-            target_path = distutils.spawn.find_executable(env_exec)
+            target_path = shutil.which(env_exec)
         else:
             target_path = AvatarConfig().get_target_path(exec_name)
         if target_path is None:

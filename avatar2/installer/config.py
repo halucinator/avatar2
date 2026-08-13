@@ -1,7 +1,7 @@
 from configparser import ConfigParser
-from distutils.dir_util import mkpath
+from os import makedirs
 from os.path import expanduser, realpath, dirname, exists
-from distutils.spawn import find_executable as find
+from shutil import which as find
 from collections import OrderedDict
 
 CONFIG_FILE = expanduser('~/.avatar2/settings.cfg')
@@ -55,7 +55,7 @@ class AvatarConfig(ConfigParser):
         self.config_file = realpath(expanduser(CONFIG_FILE))
         self.config_path = dirname(self.config_file)
 
-        mkpath(expanduser(self.config_path)) # create config dir if neccessary
+        makedirs(expanduser(self.config_path), exist_ok=True) # create config dir if neccessary
 
         # Create a default config if there's no config file yet
         if self.read(expanduser(CONFIG_FILE)) == []:

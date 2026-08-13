@@ -1,5 +1,5 @@
 from __future__ import print_function
-from distutils.spawn import find_executable as find
+from shutil import which as find
 from os import system, chdir
 from os.path import exists
 from time import sleep

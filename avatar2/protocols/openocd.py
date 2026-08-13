@@ -1,8 +1,7 @@
 import sys
 import subprocess
-import telnetlib
 import logging
-import distutils
+import shutil
 from codecs import encode
 import binascii
 from threading import Thread, Lock, Event
@@ -10,6 +9,8 @@ from struct import pack, unpack
 from time import sleep
 import re
 from os.path import abspath
+
+from avatar2.protocols._compat import SimpleTelnet
 
 if sys.version_info < (3, 0):
     import Queue as queue
@@ -75,7 +76,7 @@ class OpenOCDProtocol(Thread):
         self._origin = origin
 
         self.output_directory = output_directory
-        executable_path = distutils.spawn.find_executable(openocd_executable)
+        executable_path = shutil.which(openocd_executable)
         self._cmd_line = [executable_path]
         if debug is True:
             self._cmd_line += ['--debug']
@@ -111,7 +112,7 @@ class OpenOCDProtocol(Thread):
 
         self.log.debug("Connecting to OpenOCD on %s:%s" % (self._host, self._tcl_port))
         try:
-            self.telnet = telnetlib.Telnet(self._host, self._tcl_port)
+            self.telnet = SimpleTelnet(self._host, self._tcl_port)
             # mic check
             self.telnet.write("ocd_echo\x1a".encode('ascii'))
             self.log.debug("Connected to OpenOCD.  Saying hello...")

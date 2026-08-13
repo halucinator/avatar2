@@ -1,10 +1,10 @@
 import logging
 import json
-import telnetlib
 import re
 import threading
 
 from avatar2 import archs
+from avatar2.protocols._compat import SimpleTelnet
 
 
 import socket
@@ -68,7 +68,7 @@ class QMPProtocol(object):
             self._socket = UnixSocket(self.unix_socket)
             self._socket.read_until("\r\n")
         else:
-            self._socket = telnetlib.Telnet('127.0.0.1', self.port)
+            self._socket = SimpleTelnet('127.0.0.1', self.port)
             self._socket.read_until('\r\n'.encode('ascii'))
         self.execute_command('qmp_capabilities')
         return True

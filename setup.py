@@ -26,7 +26,7 @@ setup(
         'parse',
         'configparser',
         'npyscreen',
-        'unicorn==2.0.1.post1',
+        'unicorn>=2.0.1',
         'bitstring',
         'pylink-square',
         'pyusb',
